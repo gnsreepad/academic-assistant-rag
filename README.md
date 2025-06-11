@@ -9,9 +9,9 @@ This repository implements a simple academic assistant using the RAG paradigm. T
 
 ### Key Features
 
-- **Document Retrieval:** Finds the most relevant academic documents for a given query.
+- **Data Retrieval:** Finds the most relevant result for a given query.
 - **Contextual Generation:** Uses the retrieved documents to generate informed and accurate answers.
-- **Modular Design:** Easily extendable to support different document sources or language models.
+- **Modular Design:** Easily extendable to support different language models.
 
 
 ## How to Use
@@ -48,7 +48,6 @@ python src/assistant_rag.py
 ### 6. Customization
 
 - To use a different language model or retrieval backend, modify the relevant sections in `src/assistant_rag.py`.
-- For advanced usage, refer to the code comments and docstrings.
 
 ## License
 

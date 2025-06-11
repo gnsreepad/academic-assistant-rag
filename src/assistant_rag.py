@@ -46,7 +46,7 @@ def query_documents(question, n_results=2):
 
 # Load local LLM (can be Mistral or Phi)
 # llm_name = "mistralai/Mistral-7B-Instruct-v0.1"  # Or "microsoft/phi-2" for low-resource
-#llm_name = "tiiuae/falcon-rw-1b"
+# llm_name = "tiiuae/falcon-rw-1b"
 
 llm_name = "distilgpt2"  # or "EleutherAI/gpt-neo-125M"
 
