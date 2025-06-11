@@ -53,3 +53,26 @@ python src/app.py
 ## License
 
 This project is licensed under the MIT License.
+
+
+# Known Issues & Troubleshooting
+
+This document lists common errors and troubleshooting tips encountered when running the Academic Assistant RAG project, especially on a personal Mac with Apple Silicon (MPS) and limited RAM.
+
+---
+
+## 1. `huggingface-cli` Command Not Found
+
+**Error:** 
+zsh: command not found: huggingface-cli
+
+**Cause:**  
+`huggingface_hub` package is not installed.
+
+**Fix:**  
+```bash
+pip install huggingface_hub
+ensure to login and generate a hugging face token to use the model
+
+
+
