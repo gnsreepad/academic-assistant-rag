@@ -5,7 +5,7 @@ Retrieval-Augmented Generation (RAG) is an approach that combines large language
 
 ## About This Project
 
-This repository implements a simple academic assistant using the RAG paradigm. The core logic is in `src/app.py`, which orchestrates the retrieval of relevant academic documents and leverages a language model to answer user queries based on the retrieved content.
+This repository implements a simple academic assistant using the RAG paradigm. The core logic is in `src/assistant_rag.py`, which orchestrates the retrieval of relevant academic documents and leverages a language model to answer user queries based on the retrieved content.
 
 ### Key Features
 
@@ -36,18 +36,18 @@ pip install -r requirements.txt
 - Create two folders in the project root: `chroma_persistent_storage` (for vector database storage) and `data` (for your academic documents).
 - Place your academic documents (text files, with .txt extension) in the `data` directory.
 - By default, the application is configured to use the `data/text_book` folder as the source for academic documents.  
-- If you want to use a different folder, update the path in `src/app.py` where the documents are loaded.  
+- If you want to use a different folder, update the path in `src/assistant_rag.py` where the documents are loaded.  
 - Ensure your `.txt` files are placed in the specified directory before running the application.
 
 ### 4. Run the Application
 
 ```bash
-python src/app.py
+python src/assistant_rag.py
 ```
 
 ### 6. Customization
 
-- To use a different language model or retrieval backend, modify the relevant sections in `src/app.py`.
+- To use a different language model or retrieval backend, modify the relevant sections in `src/assistant_rag.py`.
 - For advanced usage, refer to the code comments and docstrings.
 
 ## License
