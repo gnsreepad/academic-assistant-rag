@@ -5,19 +5,28 @@ from sentence_transformers import SentenceTransformer
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 import torch
 
-# Load embedding model
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# ChromaDB setup
-chroma_client = chromadb.PersistentClient(path="chroma_persistent_storage")
-collection = chroma_client.get_or_create_collection(
-    name="document_qa_collection",
-    embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
+# ---------------------------
+# Embedding Model
+# ---------------------------
+def get_embedding_function(model_name="all-MiniLM-L6-v2"):
+    return embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
+
+
+# ---------------------------
+# ChromaDB Collection
+# ---------------------------
+def get_chroma_collection(collection_name, storage_path, embedding_fn):
+    chroma_client = chromadb.PersistentClient(path=storage_path)
+    return chroma_client.get_or_create_collection(
+        name=collection_name,
+        embedding_function=embedding_fn
     )
-)
 
-# Load and chunk documents
+
+# ---------------------------
+# Load .txt Documents
+# ---------------------------
 def load_documents_from_directory(path):
     docs = []
     for f in os.listdir(path):
@@ -26,58 +35,99 @@ def load_documents_from_directory(path):
                 docs.append({"id": f, "text": file.read()})
     return docs
 
+
+# ---------------------------
+# Split Text into Chunks
+# ---------------------------
 def split_text(text, size=1000, overlap=20):
     return [text[i:i+size] for i in range(0, len(text), size - overlap)]
 
-docs = load_documents_from_directory("./data/text_book")
-chunks = [{"id": f"{d['id']}_chunk{i}", "text": c}
-          for d in docs for i, c in enumerate(split_text(d["text"]))]
 
-# Generate embeddings and store in Chroma
-for doc in chunks:
-    embedding = embedding_model.encode(doc["text"]).tolist()
-    collection.upsert(ids=[doc["id"]], documents=[doc["text"]], embeddings=[embedding])
+# ---------------------------
+# Store Docs in Chroma (no duplicates)
+# ---------------------------
+def store_documents_in_chroma(docs, collection):
+    for d in docs:
+        chunks = split_text(d["text"])
+        for i, chunk in enumerate(chunks):
+            chunk_id = f"{d['id']}_chunk{i}"
+            # Check if chunk already exists
+            existing = collection.get(ids=[chunk_id])
+            if not existing["ids"]:  
+                collection.add(ids=[chunk_id], documents=[chunk])
 
 
-# Query ChromaDB
-def query_documents(question, n_results=2):
+# ---------------------------
+# Query Relevant Docs
+# ---------------------------
+def query_documents(collection, question, n_results=2):
     results = collection.query(query_texts=[question], n_results=n_results)
     return [doc for sublist in results["documents"] for doc in sublist]
 
-# Load local LLM (can be Mistral or Phi)
-# llm_name = "mistralai/Mistral-7B-Instruct-v0.1"  # Or "microsoft/phi-2" for low-resource
-# llm_name = "tiiuae/falcon-rw-1b"
 
-llm_name = "distilgpt2"  # or "EleutherAI/gpt-neo-125M"
+# ---------------------------
+# Load LLM (Instruction-tuned)
+# ---------------------------
+def get_llm_pipeline(llm_name="microsoft/phi-2"):
+    device = (
+        "cuda" if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available()
+        else "cpu"
+    )
+    tokenizer = AutoTokenizer.from_pretrained(llm_name)
+    model = AutoModelForCausalLM.from_pretrained(llm_name, torch_dtype=torch.float32)
+    model.to(device)
 
-tokenizer = AutoTokenizer.from_pretrained(llm_name)
-model = AutoModelForCausalLM.from_pretrained(
-    llm_name,
-    torch_dtype=torch.float32  # Force float32 to avoid bfloat16
-)
-
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-
-model.to(device)
-
-generator = pipeline("text-generation", model=model, tokenizer=tokenizer, device=0 if device.type == "mps" else -1)
+    return pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        device=-1 if device in ["mps", "cpu"] else 0
+    )
 
 
-# Generate final answer
-def generate_response(question, context_chunks):
+# ---------------------------
+# Generate Answer
+# ---------------------------
+def generate_response(generator, question, context_chunks):
     context = "\n\n".join(context_chunks)
     prompt = (
-        "You are an assistant for question-answering tasks."
-        "Use context to answer the question. If you don't know the answer, say that you"
-        "Use five sentences maximum.\n\n"
-        f"Context:\n{context}\n\nQuestion:\n{question}"
+        "You are a helpful assistant for question-answering tasks.\n"
+        "Use the given context to answer the question. "
+        "If you do not know the answer, say that you don't know. "
+        "Limit your answer to five sentences.\n\n"
+        f"Context:\n{context}\n\nQuestion:\n{question}\nAnswer:"
     )
-    output = generator(prompt, max_new_tokens=100, do_sample=True, temperature=0.7)
+    output = generator(prompt, max_new_tokens=150, do_sample=True, temperature=0.7)
     return output[0]["generated_text"]
 
-# 🔍 Test it!
-question = "tell me about the main themes in the book"
-chunks = query_documents(question)
-response = generate_response(question, chunks)
 
-print(response)
+# ---------------------------
+# Main RAG Pipeline
+# ---------------------------
+def run_rag_pipeline(text_dir_path, question):
+    embedding_fn = get_embedding_function()
+    collection = get_chroma_collection(
+        collection_name="document_qa_collection",
+        storage_path="chroma_persistent_storage",
+        embedding_fn=embedding_fn
+    )
+
+    docs = load_documents_from_directory(text_dir_path)
+    store_documents_in_chroma(docs, collection)
+
+    context_chunks = query_documents(collection, question)
+    # Models tried so far: "microsoft/phi-2", "meta-llama/Llama-3.1-70B-Instruct", 
+    generator = get_llm_pipeline("microsoft/phi-2")
+    return generate_response(generator, question, context_chunks)
+
+
+# ---------------------------
+# Example usage
+# ---------------------------
+if __name__ == "__main__":
+    text_dir_path = "./data/text_book"
+    question = "Tell me about the main themes in the book."
+    answer = run_rag_pipeline(text_dir_path, question)
+    print("\n--- ANSWER ---\n")
+    print(answer)
