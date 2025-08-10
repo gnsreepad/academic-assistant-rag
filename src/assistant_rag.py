@@ -2,10 +2,13 @@ import os
 import chromadb
 from chromadb.utils import embedding_functions
 from sentence_transformers import SentenceTransformer
-from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 import torch
 
 
+
+# Models tried so far: "microsoft/phi-2", "meta-llama/Llama-3.1-70B-Instruct", 
+LLM_NAME = "google/flan-t5-base" 
 # ---------------------------
 # Embedding Model
 # ---------------------------
@@ -68,18 +71,18 @@ def query_documents(collection, question, n_results=2):
 # ---------------------------
 # Load LLM (Instruction-tuned)
 # ---------------------------
-def get_llm_pipeline(llm_name="microsoft/phi-2"):
+def get_llm_pipeline(llm_name="google/flan-t5-base"):
     device = (
         "cuda" if torch.cuda.is_available()
         else "mps" if torch.backends.mps.is_available()
         else "cpu"
     )
     tokenizer = AutoTokenizer.from_pretrained(llm_name)
-    model = AutoModelForCausalLM.from_pretrained(llm_name, torch_dtype=torch.float32)
+    model = AutoModelForSeq2SeqLM.from_pretrained(llm_name, torch_dtype=torch.float32) # change to AutoModelForCausalLM for causal models
     model.to(device)
 
     return pipeline(
-        "text-generation",
+        "text2text-generation", #change to "text-generation" for causal models, change test2text-generation for seq2seq models
         model=model,
         tokenizer=tokenizer,
         device=-1 if device in ["mps", "cpu"] else 0
@@ -117,8 +120,7 @@ def run_rag_pipeline(text_dir_path, question):
     store_documents_in_chroma(docs, collection)
 
     context_chunks = query_documents(collection, question)
-    # Models tried so far: "microsoft/phi-2", "meta-llama/Llama-3.1-70B-Instruct", 
-    generator = get_llm_pipeline("microsoft/phi-2")
+    generator = get_llm_pipeline(LLM_NAME)
     return generate_response(generator, question, context_chunks)
 
 
