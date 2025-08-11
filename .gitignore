@@ -1,4 +1,9 @@
 data
 chroma_persistent_storage
 
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
 __pycache__
