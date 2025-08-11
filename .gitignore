@@ -1,2 +1,4 @@
 data
 chroma_persistent_storage
+
+__pycache__
