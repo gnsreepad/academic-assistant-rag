@@ -7,23 +7,26 @@ from src.model.assistant_rag import run_rag_pipeline
 uploaded_dir = tempfile.TemporaryDirectory()
 
 def save_uploaded_files(files):
-    # Clear previous files
+    # Clear previous files in the upload directory
     for f in os.listdir(uploaded_dir.name):
-        os.remove(os.path.join(uploaded_dir.name, f))
+        try:
+            os.remove(os.path.join(uploaded_dir.name, f))
+        except Exception:
+            pass
 
     if not files:
         return "No files uploaded."
 
-    # Save new uploaded files
     for file in files:
-        # Get actual file path from NamedString or string
-        file_path = file.name if hasattr(file, "name") else file
-        with open(file_path, "rb") as f_in:
-            content = f_in.read()
-
-        dest_path = os.path.join(uploaded_dir.name, os.path.basename(file_path))
-        with open(dest_path, "wb") as f_out:
-            f_out.write(content)
+        file_path = getattr(file, "name", None) or file
+        try:
+            with open(file_path, "rb") as f_in:
+                content = f_in.read()
+            dest_path = os.path.join(uploaded_dir.name, os.path.basename(file_path))
+            with open(dest_path, "wb") as f_out:
+                f_out.write(content)
+        except Exception as e:
+            return f"Error saving file {file_path}: {e}"
 
     return "Files uploaded successfully! You can now ask questions."
 
@@ -31,24 +34,22 @@ def ask_question(question, chat_history):
     if not question.strip():
         return chat_history, "Please enter a question."
 
+    chat_history = chat_history or []
+    chat_history.append(("User", question))
+
     try:
-        # Run the RAG pipeline
         answer = run_rag_pipeline(uploaded_dir.name, question)
     except Exception as e:
         answer = f"Error: {e}"
 
-    chat_history = chat_history or []
-    chat_history.append(("User", question))
     chat_history.append(("Assistant", answer))
-
     return chat_history, ""
 
-with gr.Blocks(title="📚 Document Q&A Assistant") as demo:
+with gr.Blocks(title="Document Q&A Assistant") as demo:
     gr.Markdown(
         """
         # Document Q&A Assistant  
-        Upload text files and ask questions about their content.  
-        Powered by retrieval-augmented generation (RAG) using your documents.
+        Upload **.txt** files and ask questions about their content using RAG.  
         """
     )
 
@@ -65,25 +66,29 @@ with gr.Blocks(title="📚 Document Q&A Assistant") as demo:
         with gr.Column(scale=2):
             chat = gr.Chatbot(elem_id="chatbot", label="Chat with your documents")
             question_input = gr.Textbox(
-                placeholder="Ask a question about the uploaded documents...",
+                placeholder="Type your question here...",
                 label="Your Question",
                 lines=2,
                 max_lines=5
             )
-            ask_button = gr.Button("Ask")
+            ask_button = gr.Button("Ask", variant="secondary")
 
-    upload_button.click(save_uploaded_files, inputs=file_input, outputs=upload_status)
+    upload_button.click(
+        save_uploaded_files, 
+        inputs=file_input, 
+        outputs=upload_status
+    )
 
     ask_button.click(
         ask_question,
         inputs=[question_input, chat],
-        outputs=[chat, question_input],
+        outputs=[chat, question_input]
     )
 
     question_input.submit(
         ask_question,
         inputs=[question_input, chat],
-        outputs=[chat, question_input],
+        outputs=[chat, question_input]
     )
 
     gr.HTML(
