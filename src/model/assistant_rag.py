@@ -2,13 +2,14 @@ import os
 import chromadb
 from chromadb.utils import embedding_functions
 from sentence_transformers import SentenceTransformer
-from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import (
+    AutoTokenizer, AutoConfig,
+    AutoModelForSeq2SeqLM, AutoModelForCausalLM,
+    pipeline
+)
 import torch
 
 
-
-# Models tried so far: "microsoft/phi-2", "meta-llama/Llama-3.1-70B-Instruct", 
-LLM_NAME = "google/flan-t5-base" 
 # ---------------------------
 # Embedding Model
 # ---------------------------
@@ -47,16 +48,16 @@ def split_text(text, size=1000, overlap=20):
 
 
 # ---------------------------
-# Store Docs in Chroma (no duplicates)
+# Store Docs in Chroma
 # ---------------------------
 def store_documents_in_chroma(docs, collection):
     for d in docs:
         chunks = split_text(d["text"])
         for i, chunk in enumerate(chunks):
             chunk_id = f"{d['id']}_chunk{i}"
-            # Check if chunk already exists
+            # Check if chunk already exists to avoid duplicates
             existing = collection.get(ids=[chunk_id])
-            if not existing["ids"]:  
+            if not existing["ids"]:
                 collection.add(ids=[chunk_id], documents=[chunk])
 
 
@@ -65,32 +66,66 @@ def store_documents_in_chroma(docs, collection):
 # ---------------------------
 def query_documents(collection, question, n_results=2):
     results = collection.query(query_texts=[question], n_results=n_results)
+    # Flatten list of chunks
     return [doc for sublist in results["documents"] for doc in sublist]
 
 
 # ---------------------------
-# Load LLM (Instruction-tuned)
+# Load model and tokenizer with auto-detection
 # ---------------------------
-def get_llm_pipeline(llm_name="google/flan-t5-base"):
-    device = (
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
-    tokenizer = AutoTokenizer.from_pretrained(llm_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(llm_name, torch_dtype=torch.float32) # change to AutoModelForCausalLM for causal models
+def load_model_and_tokenizer(model_name_or_path, device=None, torch_dtype=torch.float32):
+    print(f"Loading model: {model_name_or_path}")
+
+    if device is None:
+        device = (
+            "cuda" if torch.cuda.is_available()
+            else "mps" if torch.backends.mps.is_available()
+            else "cpu"
+        )
+
+    config = AutoConfig.from_pretrained(model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+
+    if config.is_encoder_decoder:
+        print("Detected Encoder-Decoder model (T5/BART style).")
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name_or_path,
+            torch_dtype=torch_dtype
+        )
+    else:
+        print("Detected Decoder-Only model (GPT/LLaMA style).")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name_or_path,
+            torch_dtype=torch_dtype
+        )
+
+    # Move model to device
     model.to(device)
 
-    return pipeline(
-        "text2text-generation", #change to "text-generation" for causal models, change test2text-generation for seq2seq models
+    # Set pipeline device param:
+    pipeline_device = -1 if device in ["cpu", "mps"] else 0
+
+    # Create pipeline according to model type
+    if config.is_encoder_decoder:
+        task = "text2text-generation"
+    else:
+        task = "text-generation"
+
+    generator = pipeline(
+        task,
         model=model,
         tokenizer=tokenizer,
-        device=-1 if device in ["mps", "cpu"] else 0
+        device=pipeline_device,
+        do_sample=True,
+        temperature=0.7,
+        max_new_tokens=150,
     )
+
+    return generator
 
 
 # ---------------------------
-# Generate Answer
+# Generate Answer from retrieved context
 # ---------------------------
 def generate_response(generator, question, context_chunks):
     context = "\n\n".join(context_chunks)
@@ -101,7 +136,7 @@ def generate_response(generator, question, context_chunks):
         "Limit your answer to five sentences.\n\n"
         f"Context:\n{context}\n\nQuestion:\n{question}\nAnswer:"
     )
-    output = generator(prompt, max_new_tokens=150, do_sample=True, temperature=0.7)
+    output = generator(prompt)
     return output[0]["generated_text"]
 
 
@@ -119,17 +154,24 @@ def run_rag_pipeline(text_dir_path, question):
     docs = load_documents_from_directory(text_dir_path)
     store_documents_in_chroma(docs, collection)
 
-    context_chunks = query_documents(collection, question)
-    generator = get_llm_pipeline(LLM_NAME)
-    return generate_response(generator, question, context_chunks)
+    context_chunks = query_documents(collection, question, n_results=3)  # tweak n_results
+
+
+    model_name = os.getenv("MODEL_NAME", "google/flan-t5-base")
+
+    generator = load_model_and_tokenizer(model_name)
+    answer = generate_response(generator, question, context_chunks)
+    return answer
 
 
 # ---------------------------
 # Example usage
 # ---------------------------
 if __name__ == "__main__":
+ 
     text_dir_path = "./data/text_book"
     question = "Tell me about the main themes in the book."
+
     answer = run_rag_pipeline(text_dir_path, question)
     print("\n--- ANSWER ---\n")
     print(answer)
