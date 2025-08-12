@@ -12,6 +12,7 @@ import nltk
 
 # Download punkt tokenizer once
 nltk.download("punkt", quiet=True)
+nltk.download('punkt_tab')
 
 
 # ---------------------------
