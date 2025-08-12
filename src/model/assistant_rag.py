@@ -9,6 +9,7 @@ from transformers import (
 )
 import torch
 import nltk
+import shutil
 
 # Download punkt tokenizer once
 nltk.download("punkt", quiet=True)
@@ -26,11 +27,16 @@ def get_embedding_function(model_name="all-MiniLM-L6-v2"):
 # ChromaDB Collection
 # ---------------------------
 def get_chroma_collection(collection_name, storage_path, embedding_fn):
+    # Remove the entire storage folder if it exists
+    if os.path.exists(storage_path):
+        shutil.rmtree(storage_path)
+        print(f"Deleted storage path: {storage_path}")
+
     chroma_client = chromadb.PersistentClient(path=storage_path)
     
-    # Delete existing collection if it exists
-    if collection_name in chroma_client.list_collections():
-        chroma_client.delete_collection(name=collection_name)
+    # # Delete existing collection if it exists
+    # if collection_name in chroma_client.list_collections():
+    #     chroma_client.delete_collection(name=collection_name)
     
     # Then create a new empty collection
     return chroma_client.get_or_create_collection(
@@ -148,21 +154,26 @@ def load_model_and_tokenizer(model_name_or_path, device=None, torch_dtype=torch.
 # Generate Answer from retrieved context
 # ---------------------------
 def generate_response(generator, question, context_chunks):
-    context = "\n\n".join(context_chunks)
-    prompt = f"""
-            You are a helpful assistant for question-answering tasks.
-            Use ONLY the given context to answer the question.
-            If the context does not contain the answer, say "I don't know."
-            Explain the historical context, causes, and consequences described in the text, using complete sentences and smooth transitions.
-            Write a clear, detailed answer.
+    tokenizer = generator.tokenizer
+    max_input_tokens = tokenizer.model_max_length  # 512 for flan-t5-large
+    
+    # Keep question intact; trim context chunks if needed
+    question_tokens = tokenizer.encode(question, add_special_tokens=False)
+    remaining_tokens = max_input_tokens - len(question_tokens) - 50  # 50 tokens for instructions buffer
 
-            Context:
-            {context}
+    safe_chunks = []
+    used_tokens = 0
+    for chunk in context_chunks:
+        chunk_tokens = tokenizer.encode(chunk, add_special_tokens=False)
+        if used_tokens + len(chunk_tokens) <= remaining_tokens:
+            safe_chunks.append(chunk)
+            used_tokens += len(chunk_tokens)
+        else:
+            break  # stop adding once hit the limit
 
-            Question:
-            {question}
-            Answer:
-            """
+    # Building prompt
+    context = "\n\n".join(safe_chunks)
+    prompt = f"""You are a helpful assistant. Use ONLY the given context to answer the question.\n\nContext:{context}\n\nQuestion:{question}Answer:"""
     output = generator(prompt)
     return output[0]["generated_text"]
 
